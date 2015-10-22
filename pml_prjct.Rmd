@@ -1,0 +1,97 @@
+Course Project for Practical Machine Learning
+==============================================
+
+Executive Summary
+-----------------
+
+This is a submission for the Course Project of the MOOC "Practical Machine Learning" offered by Johns Hopkins Bloomberg School of Public Health on the Coursera website. In this project we are given links to a training set and a testing set that we are asked to download. The data consists of measurements from 6 participants who performed barbell lifts in 5 different ways. One correct and four incorrect ones. We are asked to build a predictive model using the training set and then use said model to predict how the exercise was performed on a test set of 20 observations. We are also asked to perform cross validation during training and to report what we expect the out of sample error to be.
+
+We present a model based on Random Forests and report what we consider to be a satisfactory out of sample accuracy for the purpose of our project.
+
+Downloading and Cleaning Up our Data
+------------------------------------
+
+We begin by first setting up a working directory. In it we then create a `data` directory where we will download and analyse our data:
+
+```{r}
+if(!file.exists("PML_Project")) {
+  dir.create("PML_Project")
+}
+setwd("~/PML_Project")
+if(!file.exists("data")) {
+  dir.create("data")
+}
+```
+
+We can now download the two files, for the training and test sets, from the two locations found on the Coursera webpage:
+
+```{r}
+fileUrl.1 <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+fileUrl.2 <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+# download.file(fileUrl.1, destfile="./data/pml-training.csv")
+# download.file(fileUrl.2, destfile="./data/pml-testing.csv")
+list.files("./data")
+dateDownloaded <- date()
+dateDownloaded
+```
+
+Please note that the two lines with the `download.file()` functions are inserted as comments above in order to avoid complications with the Markdown document and unwanted downloading. Obviously, we will need to remove the `#` should we want to download the two files. We then load the `caret` package, which we later use in our analysis, and also load the training and test sets:
+
+```{r}
+library(caret)
+raw.train <- read.table("./data/pml-training.csv", header=TRUE, sep=",")
+raw.test <- read.table("./data/pml-testing.csv", header=TRUE, sep=",")
+```
+
+We can see from a very basic exploration of the training set that the researchers who compiled the data have, most likely, created extra features that help summarize information. These are variables such as "kurtosis_yaw_belt" and "amplitude_pitch_belt". We chose to discard these variables because we wish to explore the accuracy of a model that uses all the available information of the data set (and doesn't reduce the size of the sample in any way). Although this approach may be more computationally demanding it's a reasonable first step since feature creation normally requires intimate knowledge of the data set, which we assume we don't have. Below is the code "cleaning up" the training and test data sets with the help of regular expressions:
+
+```{r}
+xtra.cols.train <- grep("^kurtosis|^skewness|^max|^min|^amplitude|^var|^avg|^stddev",
+                        names(raw.train), perl=T, value=F)
+clean.train <- raw.train[, -xtra.cols.train]
+clean.train <- clean.train[, -c(1:7)]
+
+xtra.cols.test <- grep("^kurtosis|^skewness|^max|^min|^amplitude|^var|^avg|^stddev",
+                       names(raw.test), perl=T, value=F)
+clean.test <- raw.test[, -xtra.cols.test]
+clean.test <- clean.test[, -c(1:7)]
+```
+
+We have also chosen to discard the first seven columns that appear to contain time-stamp and identifier information. In doing so we assume that our observations are distributed independent of time, that they are not a time series.
+
+Building and Evaluating our Model
+---------------------------------
+
+In order to train our model and estimate the test error rate we now split the clean, downloaded training set, into a `to.train` and a `to.test` set using `caret`:
+
+```{r}
+inTrain <- createDataPartition(y=clean.train$classe, p=0.7, list=FALSE)
+to.train <- clean.train[inTrain, ]; to.test <- clean.train[-inTrain, ]
+```
+
+Next, we fit a model to our data using Random Forests. We chose Random Forests because it is one of the most popular techniques used for prediction currently. This comes at the expense of interpretability but consider this acceptable for our application. We also tried other tree approaches, including Bagging,  but Random Forests outperformed significantly. Perhaps that's to be expected as Random Forests algorithms grow a big number of trees on bootstrapped samples but, unlike bagging, they consider one out of `mtry` variables chosen at each split and that tends to decorrelate the trees and hence reduce the variability of our final estimates. This is eloquently explained in chapter 8 of the excellent book on Statistical Learning by Gareth James, Daniela Witten, Trevor Hastie and Robert Tibshirani: "An Introduction to Statistical Learning with Applications in R". This book can be found on the same website as the book on Statistical Learning discussed in the course. We use `set.seed()` for reproducibility and also 10 fold cross validation (by specifying `method="repeatedcv"` in `trainControl`). Please be advised that the code below took 20 minutes to run on a Windows 8 machine with Intel Core i5-3330 CPU 3.0GHz with 8GB of RAM.
+
+```{r}
+set.seed(1234)
+fitControl <- trainControl(method="repeatedcv", number=10, repeats=1)
+mod.fit <- train(classe~., data=to.train, method="rf",
+                 trControl=fitControl, allowParallel=TRUE)
+mod.fit
+mod.fit$finalModel
+```
+
+We see above that 10 fold Cross Validation was performed and that the optimal number of variables to chose from at each split turned out to be 2. The accuracy reported is rather impressive and we note that value `mtry=27` was very close to the optimal value of `mtry=2`. A confusion matrix is also produced when we ask to see the best model. This was calculated on the training set but we see that the OOB error is also reported (Out of Bag Error). The OOB error can be shown to be equal to the LOOC Cross Validation error, so it is an acceptable estimate of the true test error rate. We know from our lectures that LOOCV has a low bias but a high variance. Certainly higher than, say 5-fold or 10-fold Cross Validation. Since we used 10-fold Cross Validation to train our model the OOB Error has been averaged over the different folds so OOB=0.64% should be a good estimation of the true error rate, as far as the bias-variance trade off is concerned. We can go one step further and confirm this by calculating predictions for our `to.test` set and look at the confusion matrix. This is done below.
+
+Estimation of Test Error Rate and Conclusion
+--------------------------------------------
+
+Below is the code for calculating predictions for our `to.test` sample and the resulting confusion matrix.
+
+```{r}
+pred.finalModel <- predict(mod.fit$finalModel, to.test)
+confusionMatrix(pred.finalModel, to.test$classe)
+```
+
+With an Accuracy of 99.52% and a 95% Confidence Interval between 99.31% and 99.68% the estimated test error rate of 0.48% is very impressive. We also see that the OOB Error reported above is in the 95% CI. So it looks like the 0.64% error we got above was indeed a good estimate of the true error rate. The other measures reported, such as Sensitivity and Specificity are also very good indeed. We tried a handful of other models and even an attempt to combine them but the results did not justify the computational effort. Since we are asked to predict the manner of exercise on 20 test samples our model seems adequate.
+
+We have chosen not to report the predictions for the 20 test observations here.
